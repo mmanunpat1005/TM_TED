@@ -1,0 +1,20 @@
+---
+title: TED talk video classification 
+author: "Jiaming Huang, Ting Yang, and Manunpat Sirijaturaporn"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    theme: paper
+---
+<style>
+body {
+text-align: left}
+</style>
+
+
+```{r child = c('intro.Rmd', 'data.Rmd','tokenization.Rmd', 'eda.Rmd', 'sentiment.Rmd', 'Topic modeling.Rmd', 'Embedding.Rmd', 'supervised.Rmd', 'conclusion.Rmd')}
+ 
+```

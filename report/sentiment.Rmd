@@ -1,0 +1,303 @@
+---
+title: "Sentiment analysis"
+output: html_document
+---
+
+```{r,include=FALSE}
+source(here::here("scripts/setup.R"))
+```
+
+# 5. Sentiment analysis  
+
+In this section, we employ two dictionaries, AFINN and NRC, and the Valence-Shifters method to conduct sentiment analysis on the transcripts of each video, which means we do not split the transcript by every 20 sentences. It might be better to see if the sentiment of video would influence the other features. Here, we have following hypothesis:   
+
+- The sentiment of videos are related to the corresponding topic. For example, AI topic may have more positive sentiment.   
+- The sentiment of videos influences the number of likes. We expect positive sentiment videos have more likes.  
+- The sentiment of videos has changed over years, since it might be related to the corresponding affairs.    
+
+```{r, echo=TRUE, warning=FALSE}
+# resume cate, better to interpret 
+TED_sentiment$cate <- gsub("1","AI",TED_sentiment$cate)
+TED_sentiment$cate <- gsub("2","Climate change",TED_sentiment$cate)
+TED_sentiment$cate <- gsub("3","Relationships",TED_sentiment$cate)
+
+# since sentiment analysis cannot use cleaned data after stemming, so here use another way to tokenize again
+TED.tok <- unnest_tokens(
+  TED_sentiment,
+  output = "word",
+  input = "tanscript",
+  to_lower = TRUE,
+  strip_punct = TRUE,
+  strip_numeric = TRUE)
+TED.tok <- TED.tok %>% filter(word != "laughter" | word != "applaud")
+```
+
+## 5.1 Sentiment Based    
+
+First, we apply the NRC method to determine the sentiment of the transcripts of each video. As this method is based on sentiment analysis, we focus on examining the relationship between the topics of the videos, as well as the number of likes received by the videos.
+
+```{r, echo=TRUE, warning=FALSE}
+# NRC
+# join the corresponding sentiment qualifier in “nrc” 
+
+TED.sent.nrc <- 
+  inner_join(
+    TED.tok,
+    get_sentiments("nrc"),
+    by = c("word" = "word"))
+
+head(TED.sent.nrc, 5) %>% flextable() %>% autofit()
+
+```
+
+### 5.1.1 Sentiment v.s. Likes     
+
+Since there are nearly 300 transcripts (videos), we would like to extract 20 videos with the most likes and the least likes, respectively.         
+
+In this part, we apply the NRC method in two different ways, one without scaling and another with re-scaling the sentiment by their length in the documents.
+
+```{r,results='hide',message=FALSE, echo=TRUE, warning=FALSE,fig.height = 6.5}
+# Sub data for checking Video likes topic
+TED.nrc <- TED.sent.nrc %>% 
+  group_by(title,cate,likes,sentiment) %>% summarise(n=n())
+
+# too many text, hard to read
+# extract top 20, tail 20 transcipt to check their sentiment
+toplike20 <- TED.nrc[order(TED.nrc$likes,decreasing = T),][1:200,]
+taillike20 <- TED.nrc[order(TED.nrc$likes,decreasing = F),][1:200,]
+
+# top
+toplike20%>%
+  ggplot(mapping = aes(x = sentiment, y=n, fill = sentiment)) + 
+  geom_bar(stat = "identity",
+           alpha = 0.8) + 
+  facet_wrap(~ title) + 
+  coord_flip()+
+  theme(legend.position = 'bottom')+
+  labs(y="the number of sentiment")+
+  ggtitle("The sentiment of 20 videos with most likes")
+
+# tail
+taillike20%>%
+  ggplot(mapping = aes(x = sentiment, y=n, fill = sentiment)) + 
+  geom_bar(stat = "identity",
+           alpha = 0.8) + 
+  facet_wrap(~ title) + 
+  coord_flip()+
+  theme(legend.position = 'bottom')+
+  labs(y="the number of sentiment")+
+  ggtitle("The sentiment of 20 videos with least likes")
+  
+```
+
+
+```{r, echo=TRUE, warning=FALSE,fig.height = 6.5}
+
+# the frequencies of sentiments are computed, by document
+TED.sent.nrc.total <- TED.sent.nrc %>% 
+  group_by(title,likes) %>% 
+  summarize(Total = n()) %>% 
+  ungroup()
+
+#top
+left_join(
+  TED.sent.nrc,
+  TED.sent.nrc.total)%>% 
+  filter(title %in% toplike20$title) %>%
+  group_by(title, sentiment) %>%  
+  summarize(n = n(),
+            Total = unique(Total)) %>%
+  ungroup() %>% 
+  mutate(relfreq = n / Total) %>%
+  ggplot(aes(
+    x = sentiment,
+    y = relfreq,
+    fill = sentiment)) + 
+  geom_bar(stat = "identity", alpha = 0.8) + 
+  facet_wrap(~ title) + 
+  coord_flip()+
+  theme(legend.position = 'bottom')+
+  labs(y="the number of sentiment")+
+  ggtitle("The sentiment of 20 videos with most likes (Re-scale sentiment by their length)")
+
+#tail
+left_join(
+  TED.sent.nrc,
+  TED.sent.nrc.total)%>% 
+  filter(title %in% taillike20$title) %>%
+  group_by(title, sentiment) %>%  
+  summarize(n = n(),
+            Total = unique(Total)) %>%
+  ungroup() %>% 
+  mutate(relfreq = n / Total) %>%
+  ggplot(aes(
+    x = sentiment,
+    y = relfreq,
+    fill = sentiment)) + 
+  geom_bar(stat = "identity", alpha = 0.8) + 
+  facet_wrap(~ title) + 
+  coord_flip()+
+  theme(legend.position = 'bottom')+
+  labs(y="the number of sentiment")+
+  ggtitle("The sentiment of 20 videos with least likes (Re-scale sentiment by their length)")
+```
+
+We do not observe any significant differences in the distribution of sentiments, such as positive and anticipation, between videos with high and low numbers of likes. In fact, both positive and anticipation sentiments present across all videos, with some videos in the top 20 also exhibiting relatively high levels of negative and fear sentiments.       
+
+### 5.1.2 Sentiment v.s. Topics    
+
+In order to examine the frequency of sentiment in different topics, We can then compare the results to determine which sentiments are more prevalent in each topic. For example, if we analyze the Climate Change topic, we expect to see a higher frequency of negative or fear-related sentiments, due to the potentially catastrophic consequences of climate change. On the other hand, if we analyze the AI topic, we expect to see a higher frequency of anticipation or positive sentiments, as AI has the potential to bring about many benefits and advancements.
+
+
+```{r,results='hide',fig.height=4, echo=TRUE, warning=FALSE}
+# it is hard to check the sentiment for each video, then check it for each cate
+
+TED.nrc %>% 
+  group_by(cate,sentiment) %>%
+  summarise(cate_n = sum(n)) %>%
+  ggplot(mapping = aes(subgroup = cate, fill = interaction(sentiment, cate), area = cate_n)) +
+  geom_treemap(color="white", size=0.5*.pt, alpha=NA) +
+  geom_treemap_subgroup_text(
+    place = "center", alpha = 0.5, grow = TRUE) + 
+  geom_treemap_text(mapping = aes(
+    label = sentiment), 
+    color = "white",
+    place = "center", grow = FALSE) +
+  guides(fill = FALSE)
+
+```
+
+As expected, the topic of AI is often accompanied by positive and anticipation, and we could not ignore trust. However, we can see that negative also accounts for a sizable part. Contradict to our speculation, the topic of climate change has the same positive sentiment which is also the most frequent part in this topic. Moreover, each sentiment is more evenly distributed in the videos on the topic of relationships, even though the positive sentiment is still the largest.    
+
+In this case, we begin to assume that positive sentiment actually is the main sentiment in TED talk showing in all videos, based on previous analysis.    
+
+## 5.2 Value-Based    
+
+Besides the initial assumption, we would like to check one more assumption whether the positive sentiment appears in all videos, by using the value-based method: Afinn.    
+
+
+```{r, echo=TRUE, warning=FALSE,fig.height = 4}
+# Afinn
+
+TED.sent.afinn <- 
+  inner_join(
+    TED.tok,
+    get_sentiments("afinn"),
+    by = c("word" = "word"))
+TED.sent.afinn %>% 
+  group_by(title,cate) %>% 
+  summarize(Score = mean(value)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = reorder_within(title, Score,cate), y = Score, fill = cate)) + 
+  geom_bar(stat = "identity") + 
+  coord_flip() +
+  ylab("Mean Sentiment Score") +
+  xlab("")
+
+```
+
+Here, we calculate the average sentiment score per video. We notice that most videos have positive scores. Thus, TED talk do prefer giving positive videos. Additionally, from the topics perspective, it is difficult to distinguish topics from the sentiment scores.   
+
+```{r, echo=TRUE, warning=FALSE}
+#extract the top and tail videos
+video_sentiscore <- TED.sent.afinn %>% 
+  group_by(title) %>% 
+  summarize(Score = mean(value))
+```
+
+### 5.2.1 Sentiment v.s. Likes    
+
+```{r,results='hide',fig.height=2.5, echo=TRUE, warning=FALSE}
+TED.sent.afinn.like <- TED.sent.afinn %>% 
+  group_by(title,cate,likes) %>% 
+  summarize(Score = mean(value))
+
+TED.sent.afinn.like %>% ggplot(aes(x=likes,y=Score,color = cate))+
+  geom_point(size=1) +
+  geom_smooth(method = "lm")+
+  facet_wrap(~cate,scales = 'free')+
+  theme(legend.position = 'bottom')
+```
+
+We separate each category to observe the distribution of the number of likes and sentiment values. We can observe that there is no obvious pattern. Compared to AI and Relationship, the sentiment of Climate change topic is widely distributed.     
+
+### 5.2.2 Sentiment v.s. topics        
+
+```{r,results='hide',fig.height=2.5, echo=TRUE, warning=FALSE}
+TED.sent.afinn.cate <- TED.sent.afinn %>% 
+  group_by(title,cate) %>% 
+  summarize(Score = mean(value))
+
+TED.sent.afinn.cate %>% 
+  ggplot(mapping = aes(x = cate, y = Score))+
+  geom_boxplot()+
+  labs(x="Topics")
+```
+
+The sentiment values for each topic are relatively similar, and they are all in the upper-middle range (more positive). We also sport two outliers with large negative from the AI topic.     
+
+### 5.2.3 Sentiment over years   
+
+```{r,results='hide',fig.height=2.5, echo=TRUE, warning=FALSE}
+TED.sent.afinn.year <- TED.sent.afinn 
+
+TED.sent.afinn.year <- TED.sent.afinn.year %>% 
+  group_by(title,cate,posted) %>% 
+  summarize(Score = mean(value))
+
+TED.sent.afinn.year %>% ggplot(aes(x=posted,y=Score))+
+  geom_point()+
+  geom_smooth(method = "lm")+
+  theme(legend.position = 'bottom')+
+  labs(x="Posted Year")+
+  facet_wrap(~cate)+
+  scale_x_date(date_minor_breaks = "2 day")
+```
+
+Overall, the trend of sentiment value is slightly decreasing, but there is no clear correlation between sentiment value and year. 
+
+## 5.3 Using Valence-Shifters   
+
+In this section, we would like to check if the results would change after using valence-shifters.     
+
+```{r,results='hide', echo=TRUE, warning=FALSE,fig.height = 3}
+## split by sentences
+TED_sentiment_text <- get_sentences(TED_sentiment$tanscript)
+## Compute the sentiment by sentences
+TED.senti <- sentiment(TED_sentiment_text)
+## Prepare a tibble for the plot
+TED.senti <- as_tibble(TED.senti)
+
+TED.sentdoc <- sentiment_by(TED_sentiment$tanscript)
+
+TED.sentdoc %>% 
+  mutate(Document = factor(paste("Doc_", element_id, sep = ""))) %>% 
+  ggplot(aes(x = reorder(Document, ave_sentiment),
+             y = ave_sentiment)) + 
+  geom_bar(stat="identity") + 
+  coord_flip() +
+  xlab("") +
+  ylab("Average Sentiment Score")
+```
+
+```{r, results='hide', echo=TRUE, warning=FALSE}
+#check the difference between afinn method and Valence-Shifters
+#check the number of doc with score < 0 
+
+nagative_VF <- sum((TED.sentdoc$ave_sentiment <0) == T)
+
+negative <- TED.sent.afinn %>% 
+  group_by(title) %>% 
+  summarize(Score = mean(value)) %>%
+  filter(Score < 0 )
+
+nagative <- length(negative$title)
+
+# [1] 19
+# [1] 31
+```
+
+We conclude that the sentiment values are distributed as similar as the one without using Valence-Shifters. After counting the number of videos transcripts with negative values, we found that there are `31` videos having negative values before applying Valence-Shifters, and `19` videos having negative values after considering Valence-Shifters.    
+
+
+

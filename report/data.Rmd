@@ -1,0 +1,198 @@
+---
+title: "Data"
+output: html_document
+---
+
+# 2. Data Preparation    
+
+To acquire the transcript text from TED talk videos, we implemented a web scraping procedure from TED website, with the following steps:   
+
+-   Use RSelenium package open [TED website](https://www.ted.com/).    
+-   Go to TED Talks session by clicking the navigation bar button.     
+-   Select language, topics, and the sort by to specify the range of video types.     
+```{r, eval = F,message = T,echo = T}
+# go to TED talk
+drop_down <- remDr$findElement(using = 'xpath', '//*[@id="menu-button--0"]/div')
+remDr$mouseMoveToLocation(webElement=drop_down)
+remDr$findElement(using = 'xpath', '//*[@id="option-0--0"]/div[1]')$clickElement()
+Sys.sleep(2)
+
+# select language to English
+drop_down <- remDr$findElement(using = 'xpath', '//*[@id="languages"]')
+remDr$mouseMoveToLocation(webElement=drop_down)
+remDr$click(2)
+remDr$findElement(using = "xpath", '//*[@id="languages"]/optgroup/option[1]')$clickElement()
+Sys.sleep(1)
+
+# select topic (take climate change as an example)
+drop_down <- remDr$findElement(using = 'xpath', '//*[@id="topics"]')
+remDr$mouseMoveToLocation(webElement=drop_down)
+remDr$click(2)
+remDr$findElement(using = "xpath", '//*[@id="topics"]/option[3]')$clickElement()
+remDr$findElement(using = "xpath", '/html/body/div[4]/div[2]/div/div/div/div[3]/ul[1]/li[3]/a')$clickElement()
+# if want to change the capital of title, change the number in: [?]/a of the xpath
+topic <- remDr$findElement(using = "partial link text", 'Climate change')  ## put topic name here
+remDr$mouseMoveToLocation(webElement=topic)
+remDr$click(2)
+Sys.sleep(1)
+
+# select sort by the most relevant
+drop_down <- remDr$findElement(using = 'xpath', '//*[@id="filters-sort"]')
+remDr$mouseMoveToLocation(webElement=drop_down)
+remDr$click(2)
+remDr$findElement(using = "xpath", '//*[@id="filters-sort"]/optgroup/option[2]')$clickElement()
+
+```
+
+-   Due to the constantly changing structure of the TED website, we encountered difficulties when attempting to directly scrape data from the individual video pages. As a result, we implemented a workaround by first scraping the video titles from the browser result page after completing the third step of our web scraping procedure. This resulted in a data frame containing the names of all the videos that we wanted to further scrape for data.
+```{r, eval = F,message = T,echo = T}
+# first crawl all videos' titles on the first page
+html_page <- remDr$getPageSource()[[1]]
+page <- 3
+title <- as.character()
+speaker <- as.character()
+views_times <- as.character()
+page_num <- as.character()
+
+for (i in 1:page) {
+  
+  page_title <- read_html(html_page) %>% 
+    html_nodes(xpath = "//*[@id='browse-results']/div[1]/div/div/div/div/div[2]/h4[2]/a") %>% 
+    html_text() 
+  page_title <- gsub("\n","", page_title)
+  # there are 36 videos in one page, we hope 100 videos for each topic, we first scrape 3 pages
+  
+  page_speaker <- read_html(html_page) %>% 
+    html_nodes(xpath = "//*[@id='browse-results']/div[1]/div/div/div/div/div[2]/h4[1]") %>% 
+    html_text() 
+  
+  page_views_times <- read_html(html_page) %>% 
+    html_nodes(xpath = "//*[@id='browse-results']/div[1]/div/div/div/div/div[2]/div/span/span") %>% 
+    html_text() 
+  page_views_times <- gsub("\n","", page_views_times)
+  
+  page_page <- rep(i, times=length(page_title))
+  
+  next_page <- remDr$findElement(using = 'link text', 'Next')
+  remDr$mouseMoveToLocation(webElement=next_page)
+  remDr$click(2)
+  Sys.sleep(5)
+  
+  Sys.sleep(5)
+  
+  html_page <- remDr$getPageSource()[[1]]
+  
+  title <- append(title, page_title)
+  speaker <- append(speaker, page_speaker)
+  views_times <- append(views_times, page_views_times)
+  page_num <- append(page_num, page_page)
+
+}
+
+browse_result <- data.frame()
+browse_result <- data.frame(
+  "page" = page_num,
+  "title" = title,
+  "speaker" = speaker,
+  "views_times" = views_times,
+  "cate" = "Climate Change")
+```
+
+
+-   Click in the search box, use the videos' title name to search the corresponding video then always click the first result after searching by using it's `xpath`.    
+
+```{r, eval = F,message = T,echo = T}
+#click in each video to capture infos
+introduction <- as.character()
+likes <- as.character()
+tanscript <- as.character()
+title_re <- as.character()
+n <- length(waitforscrape$title)
+
+  for (i in 1:n) {
+    
+    Sys.sleep(3)
+    
+    search <- remDr$findElement(using = 'xpath', '//*[@id="filters"]/div[1]/div/div[2]/div[1]/div[1]/div/div[1]/div/input')
+    search$clickElement()
+    Sys.sleep(5)
+     
+    search$clearElement()
+    search$sendKeysToElement(list(waitforscrape$title[i], key = "enter"))
+    Sys.sleep(8)
+    
+    # click in the video
+    video_page <- remDr$findElement(using = 'xpath', "//*[@id='browse-results']/div[1]/div[1]/div/div/div/div[2]/h4[2]/a")
+    remDr$mouseMoveToLocation(webElement=video_page)
+    remDr$click(2)
+    Sys.sleep(15)
+    
+    video_title <- waitforscrape$title[i]
+    
+    # open transcript
+    drop_down <- remDr$findElement(using = 'xpath', "//*[@id='maincontent']/div/div/div/div/div[2]/div[3]/div[2]/button")
+    remDr$mouseMoveToLocation(webElement=drop_down)
+    remDr$click(2)
+    Sys.sleep(5)
+    
+    # begin to crawl infos
+    html_page <- remDr$getPageSource()[[1]]
+    
+    video_sum <- read_html(html_page) %>% 
+      html_nodes(xpath = "//*[@id='maincontent']/div/div/div/div/div[2]/div[3]/div[1]/div[2]/div/div") %>% 
+      html_text() 
+    video_sum <- video_sum[1]
+    Sys.sleep(5)
+    
+    video_likes <- read_html(html_page) %>% 
+      html_nodes(xpath = "//*[@id='maincontent']/div/div/div/div/div[2]/div[1]/div[3]/button[1]/div/div/span") %>% html_text() 
+    Sys.sleep(5)
+    
+    video_tanscript <- read_html(html_page) %>% 
+      html_nodes(xpath = "//*[@id='maincontent']/div/div/div/aside/div[2]/div[2]/div/div/div[1]") %>%
+      html_text() 
+    Sys.sleep(5)
+    
+    remDr$goBack()
+    Sys.sleep(5)
+    
+    introduction <- append(introduction, video_sum)
+    likes <- append(likes,video_likes)
+    tanscript <- append(tanscript, video_tanscript)
+    title_re <- append(title_re, video_title)
+  }
+
+video_info <- data.frame(
+  "title" = title_re,
+  "introduction" = introduction,
+  "likes" = likes,
+  "tanscript" = tanscript)
+```
+
+-   After clicking in each video's page, we first clicked `Read transcript` button to extent the transcript text area. Then, we began to scrape the all related information that we might use in the following analysis.    
+-   After scraping the information of each videos, there was a step of going back to the browser result page.     
+
+As mentioned above, since during the process of scraping TED data, we found the `for loop` of clicking in each video and scraping text is often interrupted, and some `xpaths` would fail to use in the case of different day operations. In this case, we have adopted the following response methods：   
+
+-   As we obtained the list of videos' title name first, we used the list of previously successfully obtained video information before interrupting to compare with the list of title names to obtain the list of videos to continue scraping.     
+-   We took turns using `css`, `xpath`,`link text` and `partial link text` four approaches to locate the position of the videos or the button of `Read transcript` and `Next`.     
+-   Considering this is a dynamic web crawling, we added `Sys.sleep` to each scraping and clicking step, so that the system could give the website react time.       
+
+-   We then saved the data in .csv format in the `data` folder
+```{r, eval = F,echo = T}
+TED_2 <- video_info
+TED <- left_join(title_all, TED_2, by="title")
+fwrite(TED, file = here::here("data/TED.csv"))
+```
+
+Finally, we set the closing function at the end in case closing the browser incorrectly would influence future scraping the next time.      
+
+```{r, eval = F,message = T,echo = T}
+remDr$closeServer()
+remDr$close()
+rm(remDr)
+rm(rD)
+gc()
+```
+
+    
